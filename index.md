@@ -3,8 +3,29 @@
   <body>
 
   <h1> About Me </h1>
- 	<p>
-    My name is Ryan LeBoeuf.
+  <h2> Personal </h2>
+ 	<p style="font-size:12px">
+    Welcome to my corner of the internet!<br/>
+    Computers have always been a passion of mine. I started coding with Java and Python and love both to this day.<br/>
+    In my free time, I enjoy messing around with Python, breaking my Linux install, sketching, cooking, and rewatching NCIS on Netflix.<br/>
+  </p>
+
+  <h2> Setup </h2>
+  <p style="font-size:12px">
+    I'm an avid participant in the FOSS ecosystem and as a result code on Linux whenever I can. However, this isn't always<br/>
+    possible due to employer or software requirements. I switch between Arch Linux, Pop_OS!, and Windows 10 to code depending<br/>
+    on what the task requirements are. I have a significant addiction to GNOME and i3.<br/>
+    For the specs of my computer:<br/>
+    <ul>
+      <li>CPU: AMD Ryzen 5 2600X @ 3.7GHz</li>
+      <li>Motherboard: Asus ROG STRIX B450-F GAMING ATX</li>
+      <li>RAM: Corsair Vengeance RGB Pro 16GB (2x8) DDR4-3000</li>
+      <li>Storage: Kingston A400 120GB SSD, Samsung 860 Evo 250GB SSD</li>
+      <li>GPU: EVGA GeForce GTX 1060 3GB SC</li>
+      <li>Case: NZXT H500 ATX Mid Tower</li>
+      <li>PSU: Corsair CXM 550W 80+ Bronze Semi-modular</li>
+    </ul>
+
   </p>
 
   </body>
