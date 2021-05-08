@@ -1,0 +1,40 @@
+
+* {
+  box-sizing: border-box;
+}
+
+/* Create two unequal columns that floats next to each other */
+.column {
+  float: left;
+  padding: 10px;
+}
+
+.left {
+  width: 25%;
+}
+
+.center {
+  width: 50%;
+}
+.right {
+  width: 25%;
+}
+
+/* Clear floats after the columns */
+.row:after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+p {
+  font-size: 20px;
+}
+
+ul {
+  font-size: 18px;
+}
+
+h1 {
+  font-family: "Courier New", monospace;
+}
