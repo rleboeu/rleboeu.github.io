@@ -27,6 +27,30 @@
   clear: both;
 }
 
+a:link {
+  color: rgb(235, 235, 235);
+  text-decoration: none;
+  background-color: transparent;
+}
+
+a:active {
+  color: rgb(235, 235, 235);
+  text-decoration: none;
+  background-color: transparent;
+}
+
+a:hover {
+  color: rgb(255, 77, 77);
+  text-decoration: none;
+  background-color: transparent;
+}
+
+a:visited {
+  color: rgb(255, 77, 77);
+  text-decoration: none;
+  background-color: transparent;
+}
+
 p {
   font-size: 20px;
 }
