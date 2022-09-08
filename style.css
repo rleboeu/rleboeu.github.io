@@ -60,6 +60,12 @@ ul {
   font-size: 22px;
 }
 
-h1 {
-  font-family: "Courier New", monospace;
+.img-with-text {
+  text-align: center;
+  width: 100%;
+}
+
+.img-with-text img {
+  display: block;
+  margin: 0 auto;
 }
