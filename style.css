@@ -27,6 +27,10 @@
   clear: both;
 }
 
+b {
+  font-size: 25px;
+}
+
 a:link {
   color: rgb(235, 235, 235);
   text-decoration: none;
