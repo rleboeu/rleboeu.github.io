@@ -1,6 +1,6 @@
 import { Suspense } from 'react'
-import { Link, NavLink, Outlet } from 'react-router'
-import { tools } from '../tools/registry'
+import { Link, Outlet } from 'react-router'
+import ToolSearch from './ToolSearch'
 
 export default function Layout() {
   return (
@@ -9,13 +9,7 @@ export default function Layout() {
         <Link to="/" className="brand">
           rleboeu.github.io
         </Link>
-        <nav className="nav">
-          {tools.map((tool) => (
-            <NavLink key={tool.path} to={`/${tool.path}`}>
-              {tool.name}
-            </NavLink>
-          ))}
-        </nav>
+        <ToolSearch />
       </header>
       <main className="main">
         <Suspense fallback={<p>Loading…</p>}>

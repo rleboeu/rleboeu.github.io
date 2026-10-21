@@ -5,6 +5,7 @@
   --border: #e2e2e2;
   --accent: #2563eb;
   --card: #f7f7f8;
+  --shadow: 0 12px 32px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.06);
 
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -21,6 +22,7 @@
     --border: #2c2c2c;
     --accent: #60a5fa;
     --card: #1c1c1e;
+    --shadow: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3);
   }
 }
 
@@ -61,20 +63,150 @@ a {
   text-decoration: none;
 }
 
-.nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
+.search {
+  position: relative;
+  flex: 1 1 220px;
+  max-width: 320px;
 }
 
-.nav a {
-  color: var(--muted);
-  text-decoration: none;
+.search-icon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  transform: translateY(-50%);
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  pointer-events: none;
 }
 
-.nav a.active {
+.search-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 36px 0 36px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
   color: var(--fg);
+  font: inherit;
+  font-size: 0.95rem;
+  appearance: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    background-color 0.15s;
+}
+
+.search-input::placeholder {
+  color: var(--muted);
+}
+
+.search-input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.search-input:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.search-hint {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.search-input:focus ~ .search-hint {
+  display: none;
+}
+
+.search-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: max(100%, min(380px, calc(100vw - 32px)));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.search-popover ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-option[aria-selected='true'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.search-option-name {
   font-weight: 500;
+}
+
+.search-option[aria-selected='true'] .search-option-name {
+  color: var(--accent);
+}
+
+.search-option-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.85rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.search-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .search-popover {
+    width: 100%;
+  }
 }
 
 .main {
@@ -214,6 +346,38 @@ a {
 .converter-mode > span {
   display: flex;
   flex-direction: column;
+}
+
+.converter-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.converter-setting > span:first-child {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+}
+.converter-setting-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.converter-setting-control output {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.converter-setting input[type='color'] {
+  width: 48px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
 }
 
 .dropzone {

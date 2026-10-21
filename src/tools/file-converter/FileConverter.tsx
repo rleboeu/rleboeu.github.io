@@ -12,6 +12,8 @@ export default function FileConverter() {
   const [fromId, setFromId] = useState(sourceFormats[0].id)
   const [toId, setToId] = useState(targetsFor(sourceFormats[0])[0].id)
   const [mode, setMode] = useState<string | undefined>()
+  const [quality, setQuality] = useState(92)
+  const [background, setBackground] = useState('#ffffff')
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
   const [status, setStatus] = useState<Status>({ state: 'idle' })
@@ -22,6 +24,8 @@ export default function FileConverter() {
   const conversion = findConversion(from, to)
   const modes = conversion?.modes
   const activeMode = modes?.some((m) => m.id === mode) ? mode : modes?.[0].id
+  const settings = conversion?.settings ?? []
+  const extensions = from.accept.split(',').filter((a) => a.startsWith('.'))
 
   // Free the previous download whenever a new result replaces it.
   useEffect(() => {
@@ -39,8 +43,8 @@ export default function FileConverter() {
 
   const chooseFile = (chosen: File | undefined) => {
     if (!chosen) return
-    if (!chosen.name.toLowerCase().endsWith(`.${from.extension}`)) {
-      setStatus({ state: 'error', message: `That doesn't look like a ${from.label}. Choose a .${from.extension} file.` })
+    if (!extensions.some((ext) => chosen.name.toLowerCase().endsWith(ext))) {
+      setStatus({ state: 'error', message: `That doesn't look like a ${from.label}. Choose a ${extensions.join(' or ')} file.` })
       return
     }
     setFile(chosen)
@@ -59,6 +63,8 @@ export default function FileConverter() {
     try {
       const blob = await conversion.convert(file, {
         mode: activeMode,
+        quality: settings.includes('quality') ? quality : undefined,
+        background: settings.includes('background') ? background : undefined,
         onProgress: (done, total) => setStatus({ state: 'converting', done, total }),
       })
       const filename = `${file.name.replace(/\.[^.]+$/, '')}.${to.extension}`
@@ -130,6 +136,51 @@ export default function FileConverter() {
               </span>
             </label>
           ))}
+        </fieldset>
+      )}
+
+      {settings.length > 0 && (
+        <fieldset className="converter-modes" disabled={converting}>
+          <legend>Output</legend>
+          {settings.includes('quality') && (
+            <label className="converter-setting">
+              <span>
+                <strong>Quality</strong>
+                <span className="muted">Lower values make smaller files with more visible compression.</span>
+              </span>
+              <span className="converter-setting-control">
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  value={quality}
+                  onChange={(e) => {
+                    setQuality(Number(e.target.value))
+                    reset()
+                  }}
+                />
+                <output>{quality}</output>
+              </span>
+            </label>
+          )}
+          {settings.includes('background') && (
+            <label className="converter-setting">
+              <span>
+                <strong>Background</strong>
+                <span className="muted">{to.label} has no transparency, so transparent areas are filled with this color.</span>
+              </span>
+              <span className="converter-setting-control">
+                <input
+                  type="color"
+                  value={background}
+                  onChange={(e) => {
+                    setBackground(e.target.value)
+                    reset()
+                  }}
+                />
+              </span>
+            </label>
+          )}
         </fieldset>
       )}
 

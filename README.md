@@ -17,7 +17,7 @@ npm run lint     # oxlint
 ## Adding a tool
 
 1. Create a component under `src/tools/<tool-name>/`.
-2. Register it in `src/tools/registry.ts`. It gets a route (`/#/<path>`), a nav link and a card on the home page automatically, and is lazy-loaded so its dependencies only download when the tool is opened.
+2. Register it in `src/tools/registry.ts`, including its hidden search `tags` (see `CLAUDE.md`). It gets a route (`/#/<path>`), a card on the home page and a result in the header search automatically, and is lazy-loaded so its dependencies only download when the tool is opened.
 
 ## Deployment
 

@@ -6,7 +6,8 @@ GlobalWorkerOptions.workerSrc = workerUrl
 
 /** Opens a PDF. Call `close` when done to free the document and its worker. */
 export async function loadPdf(file: File): Promise<{ pdf: PDFDocumentProxy; close: () => Promise<void> }> {
-  const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()) })
+  // fontExtraProperties keeps each font's name, which is the only reliable bold/italic signal for embedded fonts.
+  const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()), fontExtraProperties: true })
   try {
     return { pdf: await task.promise, close: () => task.destroy() }
   } catch (error) {
@@ -29,6 +30,8 @@ export interface TextSpan {
   bold: boolean
   italic: boolean
   family: FontFamily
+  /** The font's family name from the PDF (e.g. "Times New Roman"), when it has a usable one. */
+  font?: string
 }
 
 export interface TextLine {
@@ -64,15 +67,18 @@ export async function readPageLayout(page: PDFPageProxy, { withFonts = false } =
     const [a, b, c, d, e, f] = (item as TextItem).transform as number[]
     const [x, y] = viewport.convertToViewportPoint(e, f)
     const font = withFonts ? getFont(page, item.fontName) : undefined
+    // pdf.js only sets bold/italic for fonts it has to substitute, so embedded fonts are judged by name.
+    const fontName = font?.name ?? ''
     spans.push({
       text: item.str,
       x,
       y,
       width: item.width,
       fontSize: Math.hypot(c, d) || Math.hypot(a, b) || 12,
-      bold: Boolean(font?.bold || font?.black),
-      italic: Boolean(font?.italic),
+      bold: Boolean(font?.bold || font?.black) || /bold|black|heavy/i.test(fontName),
+      italic: Boolean(font?.italic) || /italic|oblique/i.test(fontName),
       family: toFamily(content.styles[item.fontName]?.fontFamily),
+      font: familyName(fontName),
     })
   }
 
@@ -122,6 +128,8 @@ export function median(values: number[]): number {
 }
 
 interface FontInfo {
+  /** PostScript name, e.g. "ABCDEF+Helvetica-Bold". Only present with `fontExtraProperties`. */
+  name?: string
   bold?: boolean
   black?: boolean
   italic?: boolean
@@ -133,6 +141,19 @@ function getFont(page: PDFPageProxy, fontName: string): FontInfo | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * Turns a PostScript font name into the family name word processors know, e.g. "ABCDEF+TimesNewRomanPS-BoldMT"
+ * becomes "Times New Roman". Returns undefined for placeholder names like "F1" that say nothing about the font.
+ */
+function familyName(postScriptName: string): string | undefined {
+  const base = postScriptName
+    .replace(/^[A-Z]{6}\+/, '') // subset prefix
+    .split(/[-,]/)[0] // style suffix ("-Bold", ",Italic")
+    .replace(/(PS)?MT$|PS$/, '') // Monotype/PostScript markers ("ArialMT")
+  if (base.length < 3 || /^[A-Za-z]{1,3}\d+$/.test(base)) return undefined
+  return base.replace(/([a-z])([A-Z])/g, '$1 $2')
 }
 
 function toFamily(cssFamily: string | undefined): FontFamily {

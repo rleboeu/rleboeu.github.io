@@ -13,10 +13,20 @@ import {
   TextWrappingType,
   VerticalPositionRelativeFrom,
   type ISectionOptions,
+  type TabStopDefinition,
 } from 'docx'
 import type { PDFPageProxy } from 'pdfjs-dist'
 import type { ConvertOptions } from './conversions'
-import { lineText, loadPdf, needsSpace, readPageLayout, type FontFamily, type PageLayout, type TextLine } from './pdf'
+import {
+  lineText,
+  loadPdf,
+  needsSpace,
+  readPageLayout,
+  type FontFamily,
+  type PageLayout,
+  type TextLine,
+  type TextSpan,
+} from './pdf'
 
 /** Word measures in twentieths of a point. */
 const TWIPS_PER_POINT = 20
@@ -130,17 +140,60 @@ function textSection(layout: PageLayout): ISectionOptions {
     top: clampMargin(lines[0].y - lines[0].fontSize),
     bottom: clampMargin(height - lines[lines.length - 1].y),
   }
-  // Indents are measured from the margin Word actually uses, which may differ from the text's edge after clamping.
-  const marginLeft = margin.left / TWIPS_PER_POINT
+  // Indents are measured from the margins Word actually uses, which may differ from the text's edges after clamping.
+  const page: PageGeometry = {
+    left,
+    right,
+    pageWidth: width,
+    marginLeft: margin.left / TWIPS_PER_POINT,
+    marginRight: margin.right / TWIPS_PER_POINT,
+  }
 
   const blocks = groupBlocks(lines, left, right)
   return {
     properties: { page: { size: pageSize(width, height), margin } },
-    children: blocks.map((block, i) => {
-      const previous = blocks[i - 1]?.lines.at(-1)
-      return blockToParagraph(block, previous, { left, right, pageWidth: width, marginLeft })
-    }),
+    children: blocks.map((block, i) => blockToParagraph(block, blocks[i - 1]?.lines.at(-1), page)),
   }
+}
+
+interface PageGeometry {
+  /** Left and right edges of the page's text. */
+  left: number
+  right: number
+  pageWidth: number
+  marginLeft: number
+  marginRight: number
+}
+
+/** Spans of one line with no wide gap between them; wide gaps separate table columns or tab-aligned text. */
+interface Segment {
+  spans: TextSpan[]
+  x0: number
+  x1: number
+}
+
+function splitSegments(line: TextLine): Segment[] {
+  const segments: Segment[] = []
+  for (const span of line.spans) {
+    const segment = segments.at(-1)
+    if (segment && span.x - segment.x1 <= span.fontSize * 1.5) {
+      segment.spans.push(span)
+      segment.x1 = Math.max(segment.x1, span.x + span.width)
+    } else {
+      segments.push({ spans: [span], x0: span.x, x1: span.x + span.width })
+    }
+  }
+  return segments
+}
+
+type Alignment = 'left' | 'center' | 'right'
+
+/** Whether a stretch of text starting away from the left edge is centered on the page or flush with the right edge. */
+function alignmentOf({ x0, x1 }: { x0: number; x1: number }, { left, right, pageWidth }: PageGeometry): Alignment {
+  if (x0 <= left + (right - left) * 0.1) return 'left'
+  if (Math.abs(x1 - right) <= 2) return 'right'
+  if (Math.abs((x0 + x1) / 2 - pageWidth / 2) < pageWidth * 0.02) return 'center'
+  return 'left'
 }
 
 function groupBlocks(lines: TextLine[], left: number, right: number): Block[] {
@@ -174,41 +227,42 @@ function continuesBlock(block: Block, prev: TextLine, line: TextLine, right: num
   return Math.abs(line.x0 - block.lines[1].x0) <= 2
 }
 
-function blockToParagraph(
-  { lines }: Block,
-  previous: TextLine | undefined,
-  { left, right, pageWidth, marginLeft }: { left: number; right: number; pageWidth: number; marginLeft: number },
-): Paragraph {
-  const first = lines[0]
-  const textWidth = right - left
-  const centered = lines.every(
-    (l) => l.x0 > left + textWidth * 0.1 && Math.abs((l.x0 + l.x1) / 2 - pageWidth / 2) < pageWidth * 0.02,
-  )
+const twips = (points: number) => Math.round(points * TWIPS_PER_POINT)
 
-  const bodyLeft = lines[1]?.x0 ?? first.x0
-  const twips = (points: number) => Math.round(points * TWIPS_PER_POINT)
-  const firstLineOffset = first.x0 - bodyLeft
-  const indent = centered
-    ? undefined
-    : {
-        left: Math.max(0, twips(bodyLeft - marginLeft)),
-        ...(firstLineOffset >= 0 ? { firstLine: twips(firstLineOffset) } : { hanging: twips(-firstLineOffset) }),
-      }
+function blockToParagraph({ lines }: Block, previous: TextLine | undefined, page: PageGeometry): Paragraph {
+  const first = lines[0]
+  const segments = lines.map(splitSegments)
+  // The whole paragraph is centered or right-aligned only when every line is a single stretch of text placed that way.
+  const lineAlignments = segments.map((s) => (s.length === 1 ? alignmentOf(s[0], page) : 'left'))
+  const alignment = lineAlignments.every((a) => a === lineAlignments[0]) ? lineAlignments[0] : 'left'
 
   const lineGap = lines.length > 1 ? lines[1].y - first.y : undefined
   const before = previous ? first.y - previous.y - first.fontSize * 1.2 : 0
-  const { runs, tabStops } = toRuns(lines, marginLeft)
+  const { runs, tabStops } = toRuns(segments, page)
   return new Paragraph({
-    alignment: centered ? AlignmentType.CENTER : AlignmentType.LEFT,
-    indent,
+    alignment: { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT }[alignment],
+    indent: paragraphIndent(lines, alignment, page),
     spacing: {
       before: twips(Math.min(Math.max(before, 0), 72)),
       after: 0,
       ...(lineGap ? { line: twips(lineGap), lineRule: LineRuleType.AT_LEAST } : {}),
     },
-    tabStops: tabStops.map((position) => ({ type: TabStopType.LEFT, position: twips(position) })),
+    tabStops: tabStops.map(({ type, position }) => ({ type, position: twips(position) })),
     children: runs,
   })
+}
+
+function paragraphIndent(lines: TextLine[], alignment: Alignment, page: PageGeometry) {
+  if (alignment === 'center') return undefined
+  // Word right-aligns to its margin, which can sit right of where the text actually ended.
+  if (alignment === 'right') return { right: Math.max(0, twips(page.pageWidth - page.marginRight - lines[0].x1)) }
+  const first = lines[0]
+  const bodyLeft = lines[1]?.x0 ?? first.x0
+  const firstLineOffset = first.x0 - bodyLeft
+  return {
+    left: Math.max(0, twips(bodyLeft - page.marginLeft)),
+    ...(firstLineOffset >= 0 ? { firstLine: twips(firstLineOffset) } : { hanging: twips(-firstLineOffset) }),
+  }
 }
 
 interface RunStyle {
@@ -219,11 +273,12 @@ interface RunStyle {
 }
 
 /**
- * Converts lines to styled runs. Wide horizontal gaps (table columns, tab-aligned text) become tabs, with tab stop
- * positions returned in points from the left margin.
+ * Converts lines (already split into segments) to styled runs. Every segment after a line's first is reached by a tab,
+ * whose stop keeps it centered or flush right when it was placed that way, so a right-aligned date stays at the right
+ * edge even if Word's font is a little wider. Positions are in points from the left margin.
  */
-function toRuns(lines: TextLine[], marginLeft: number): { runs: TextRun[]; tabStops: number[] } {
-  const tabStops = new Set<number>()
+function toRuns(lines: Segment[][], page: PageGeometry): { runs: TextRun[]; tabStops: TabStopDefinition[] } {
+  const tabStops = new Map<number, TabStopDefinition['type']>()
   const runs: (RunStyle & { text: string })[] = []
   const append = (text: string, style: RunStyle) => {
     const last = runs.at(-1)
@@ -234,37 +289,52 @@ function toRuns(lines: TextLine[], marginLeft: number): { runs: TextRun[]; tabSt
     }
   }
 
-  lines.forEach((line, i) => {
+  lines.forEach((segments, i) => {
     // Lines of one paragraph are joined with a space, except after a line-end hyphen.
     if (i > 0 && runs.length > 0 && !/[-\s]$/.test(runs.at(-1)!.text)) runs.at(-1)!.text += ' '
-    let lineSoFar = ''
-    let end = -Infinity
-    for (const span of line.spans) {
-      const style: RunStyle = {
-        bold: span.bold,
-        italics: span.italic,
-        size: Math.round(span.fontSize * 2), // half-points
-        font: WORD_FONTS[span.family],
+    segments.forEach((segment, j) => {
+      let tab = ''
+      if (j > 0) {
+        const alignment = alignmentOf(segment, page)
+        const [type, x] =
+          alignment === 'right'
+            ? [TabStopType.RIGHT, segment.x1]
+            : alignment === 'center'
+              ? [TabStopType.CENTER, (segment.x0 + segment.x1) / 2]
+              : [TabStopType.LEFT, segment.x0]
+        tabStops.set(Math.round(x - page.marginLeft), type)
+        tab = '\t'
       }
-      let separator = ''
-      if (lineSoFar && span.x - end > span.fontSize * 1.5) {
-        separator = '\t'
-        tabStops.add(Math.round(span.x - marginLeft))
-      } else if (lineSoFar && needsSpace(lineSoFar, span, end)) {
-        separator = ' '
+      let segmentSoFar = ''
+      let end = -Infinity
+      for (const span of segment.spans) {
+        const style: RunStyle = {
+          bold: span.bold,
+          italics: span.italic,
+          size: Math.round(span.fontSize * 2), // half-points
+          font: span.font ?? WORD_FONTS[span.family],
+        }
+        const text = (segmentSoFar && needsSpace(segmentSoFar, span, end) ? ' ' : '') + span.text
+        // The segment's tab goes in front of its first span, in that span's style.
+        append(tab + text, style)
+        tab = ''
+        segmentSoFar += text
+        end = span.x + span.width
       }
-      const text = separator + span.text
-      append(text, style)
-      lineSoFar += text
-      end = span.x + span.width
-    }
+    })
   })
 
   return {
     runs: runs.map(
-      ({ text, ...style }) =>
-        new TextRun({ children: text.split('\t').flatMap((part, i) => (i ? [new Tab(), part] : [part])), ...style }),
+      ({ text, bold, italics, ...style }) =>
+        new TextRun({
+          children: text.split('\t').flatMap((part, i) => (i ? [new Tab(), part] : [part])),
+          // Omitted rather than false: some readers (macOS Quick Look, TextEdit) treat an explicit "false" as on.
+          bold: bold || undefined,
+          italics: italics || undefined,
+          ...style,
+        }),
     ),
-    tabStops: [...tabStops].sort((a, b) => a - b),
+    tabStops: [...tabStops].sort(([a], [b]) => a - b).map(([position, type]) => ({ type, position })),
   }
 }
