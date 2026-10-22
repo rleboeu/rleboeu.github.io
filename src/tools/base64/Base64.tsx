@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
+import Pane from '../../components/Pane'
 import { byteLength, decodeBase64, encodeBase64 } from './codec'
 
 type Side = 'text' | 'base64'
@@ -27,15 +28,15 @@ export default function Base64() {
   }
 
   return (
-    <section className="b64">
-      <div className="b64-intro">
+    <section className="tool-page">
+      <div className="tool-intro">
         <h1>Base64 Encoding</h1>
         <p className="muted">
           Type in either box to convert to the other. Everything runs in your browser.
         </p>
       </div>
 
-      <div className="b64-toolbar">
+      <div className="tool-toolbar">
         <label className="switch">
           <input type="checkbox" checked={urlSafe} onChange={(e) => toggleUrlSafe(e.target.checked)} />
           <span className="switch-track" aria-hidden="true" />
@@ -48,7 +49,7 @@ export default function Base64() {
         </button>
       </div>
 
-      <div className={`b64-panes from-${source}`}>
+      <div className={`panes from-${source}`}>
         <Pane
           id={`${id}-text`}
           label="Plain text"
@@ -59,7 +60,7 @@ export default function Base64() {
           meta={`${count([...text].length, 'character')} · ${count(byteLength(text), 'byte')}`}
           autoFocus
         />
-        <div className="b64-direction" aria-hidden="true">
+        <div className="pane-direction" aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="M5 12h14M13 6l6 6-6 6" />
           </svg>
@@ -77,63 +78,6 @@ export default function Base64() {
         />
       </div>
     </section>
-  )
-}
-
-interface PaneProps {
-  id: string
-  label: string
-  value: string
-  placeholder: string
-  active: boolean
-  onChange: (value: string) => void
-  meta: string
-  error?: string | null
-  monospace?: boolean
-  autoFocus?: boolean
-}
-
-function Pane({ id, label, value, placeholder, active, onChange, meta, error, monospace, autoFocus }: PaneProps) {
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    if (!copied) return
-    const timer = setTimeout(() => setCopied(false), 1500)
-    return () => clearTimeout(timer)
-  }, [copied])
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-    } catch {
-      // Clipboard access can be denied; the text is still there to select by hand.
-    }
-  }
-
-  return (
-    <div className={`b64-pane${active ? ' active' : ''}${error ? ' invalid' : ''}`}>
-      <div className="b64-pane-header">
-        <label htmlFor={id}>{label}</label>
-        <button type="button" className="b64-copy" disabled={!value} onClick={copy}>
-          {copied ? 'Copied ✓' : 'Copy'}
-        </button>
-      </div>
-      <textarea
-        id={id}
-        className={monospace ? 'monospace' : undefined}
-        value={value}
-        placeholder={placeholder}
-        spellCheck={false}
-        autoFocus={autoFocus}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={`${id}-status`}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <div id={`${id}-status`} className="b64-pane-footer" aria-live="polite">
-        {error ? <span className="error">{error}</span> : <span className="muted">{meta}</span>}
-      </div>
-    </div>
   )
 }
 
