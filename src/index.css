@@ -415,3 +415,239 @@ a {
   align-items: center;
   gap: 12px;
 }
+
+.b64 {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.b64-intro h1,
+.b64-intro p {
+  margin: 0;
+}
+
+.b64-intro h1 {
+  margin-bottom: 4px;
+}
+
+.b64-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border);
+  transition: background-color 0.15s;
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: transform 0.15s;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(16px);
+}
+
+.switch input:focus-visible + .switch-track {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.b64-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.b64-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.b64-pane.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.b64-pane:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.b64-pane.invalid,
+.b64-pane.invalid:focus-within {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgb(220 38 38 / 0.15);
+}
+
+.b64-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 0 14px;
+}
+
+.b64-pane-header label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.b64-pane.active .b64-pane-header label {
+  color: var(--accent);
+}
+
+.b64-copy {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.b64-copy:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.b64-copy:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.b64-pane textarea {
+  width: 100%;
+  min-height: 260px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  resize: vertical;
+  overflow-wrap: anywhere;
+}
+
+.b64-pane textarea:focus {
+  outline: none;
+}
+
+.b64-pane textarea::placeholder {
+  color: var(--muted);
+}
+
+.b64-pane textarea.monospace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.b64-pane-footer {
+  padding: 6px 14px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.b64-direction {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--accent);
+}
+
+.b64-direction svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.25s;
+}
+
+.b64-panes.from-base64 .b64-direction svg {
+  transform: rotate(180deg);
+}
+
+@media (max-width: 680px) {
+  .b64-panes {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+  }
+
+  .b64-direction {
+    justify-self: center;
+  }
+
+  .b64-pane textarea {
+    min-height: 160px;
+  }
+
+  .b64-direction svg {
+    transform: rotate(90deg);
+  }
+
+  .b64-panes.from-base64 .b64-direction svg {
+    transform: rotate(-90deg);
+  }
+}
+
+@media (max-width: 420px) {
+  .switch-hint {
+    display: none;
+  }
+}
