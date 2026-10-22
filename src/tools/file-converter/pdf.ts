@@ -25,6 +25,8 @@ export type FontFamily = 'serif' | 'sans-serif' | 'monospace'
 export interface TextSpan {
   text: string
   x: number
+  /** Baseline, measured from the top of the page. */
+  y: number
   width: number
   fontSize: number
   bold: boolean
@@ -61,7 +63,7 @@ export async function readPageLayout(page: PDFPageProxy, { withFonts = false } =
   if (withFonts) await page.getOperatorList()
   const content = await page.getTextContent()
 
-  const spans: (TextSpan & { y: number })[] = []
+  const spans: TextSpan[] = []
   for (const item of content.items) {
     if (!('str' in item) || item.str.trim() === '') continue
     const [a, b, c, d, e, f] = (item as TextItem).transform as number[]
@@ -82,9 +84,14 @@ export async function readPageLayout(page: PDFPageProxy, { withFonts = false } =
     })
   }
 
-  spans.sort((p, q) => p.y - q.y || p.x - q.x)
+  const charWidths = spans.filter((s) => s.text.length > 0).map((s) => s.width / s.text.length)
+  return { width: viewport.width, height: viewport.height, lines: groupLines(spans), charWidth: median(charWidths) || 6 }
+}
+
+/** Groups spans into lines sorted top to bottom, each with its spans sorted left to right. */
+export function groupLines(spans: readonly TextSpan[]): TextLine[] {
   const lines: TextLine[] = []
-  for (const span of spans) {
+  for (const span of [...spans].sort((p, q) => p.y - q.y || p.x - q.x)) {
     // Items on the same line share a baseline (within a fraction of the font size; superscripts drift a bit).
     const line = lines.findLast((l) => Math.abs(l.y - span.y) < Math.min(l.fontSize, span.fontSize) * 0.5)
     if (line) {
@@ -99,10 +106,7 @@ export async function readPageLayout(page: PDFPageProxy, { withFonts = false } =
     line.x0 = line.spans[0].x
     line.x1 = Math.max(...line.spans.map((s) => s.x + s.width))
   }
-  lines.sort((p, q) => p.y - q.y)
-
-  const charWidths = spans.filter((s) => s.text.length > 0).map((s) => s.width / s.text.length)
-  return { width: viewport.width, height: viewport.height, lines, charWidth: median(charWidths) || 6 }
+  return lines.sort((p, q) => p.y - q.y)
 }
 
 /** Joins a line's spans into one string, inserting a space wherever there is a visible gap. */

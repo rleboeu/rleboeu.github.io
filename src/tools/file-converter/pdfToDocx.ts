@@ -1,23 +1,34 @@
 import {
   AlignmentType,
+  BorderStyle,
   Document,
+  HeightRule,
   HorizontalPositionRelativeFrom,
   ImageRun,
   LineRuleType,
   Packer,
   PageOrientation,
   Paragraph,
+  ShadingType,
   Tab,
+  Table,
+  TableBorders,
+  TableCell,
+  TableLayoutType,
+  TableRow,
   TabStopType,
   TextRun,
   TextWrappingType,
+  VerticalAlignTable,
   VerticalPositionRelativeFrom,
+  WidthType,
   type ISectionOptions,
   type TabStopDefinition,
 } from 'docx'
 import type { PDFPageProxy } from 'pdfjs-dist'
 import type { ConvertOptions } from './conversions'
 import {
+  groupLines,
   lineText,
   loadPdf,
   needsSpace,
@@ -27,6 +38,8 @@ import {
   type TextLine,
   type TextSpan,
 } from './pdf'
+import { readShapes, type Rule, type Fill } from './pdfShapes'
+import { findTables, type Border, type Table as PdfTable, type TableCell as PdfTableCell } from './pdfTables'
 
 /** Word measures in twentieths of a point. */
 const TWIPS_PER_POINT = 20
@@ -52,7 +65,7 @@ export async function pdfToDocx(file: File, { mode = 'editable', onProgress }: C
       } else {
         const layout = await readPageLayout(page, { withFonts: true })
         hasText ||= layout.lines.length > 0
-        sections.push(textSection(layout))
+        sections.push(textSection(layout, await readShapes(page)))
       }
       page.cleanup()
     }
@@ -124,45 +137,193 @@ interface Block {
   lines: TextLine[]
 }
 
-function textSection(layout: PageLayout): ISectionOptions {
-  const { lines, width, height } = layout
-  if (lines.length === 0) {
+function textSection(layout: PageLayout, shapes: { rules: Rule[]; fills: Fill[] }): ISectionOptions {
+  const { width, height } = layout
+  const { tables, rest } = findTables(shapes.rules, shapes.fills, layout.lines.flatMap((l) => l.spans), layout)
+  const lines = groupLines(rest)
+  if (lines.length === 0 && tables.length === 0) {
     return { properties: { page: { size: pageSize(width, height) } }, children: [new Paragraph({})] }
   }
 
-  const left = Math.min(...lines.map((l) => l.x0))
-  const right = Math.max(...lines.map((l) => l.x1))
+  const left = Math.min(...lines.map((l) => l.x0), ...tables.map((t) => t.xs[0]))
+  const right = Math.max(...lines.map((l) => l.x1), ...tables.map((t) => t.xs.at(-1)!))
+  const top = Math.min(...lines.map((l) => l.y - l.fontSize), ...tables.map((t) => t.ys[0]))
+  const bottom = Math.max(...lines.map((l) => l.y), ...tables.map((t) => t.ys.at(-1)!))
   const clampMargin = (points: number) => Math.round(Math.min(Math.max(points, 18), 108) * TWIPS_PER_POINT)
   const margin = {
     left: clampMargin(left),
     // Ragged-right text ends short of the real margin, so assume the margins are symmetric unless text runs wider.
     right: clampMargin(Math.min(width - right, left)),
-    top: clampMargin(lines[0].y - lines[0].fontSize),
-    bottom: clampMargin(height - lines[lines.length - 1].y),
+    top: clampMargin(top),
+    bottom: clampMargin(height - bottom),
   }
   // Indents are measured from the margins Word actually uses, which may differ from the text's edges after clamping.
-  const page: PageGeometry = {
-    left,
-    right,
-    pageWidth: width,
-    marginLeft: margin.left / TWIPS_PER_POINT,
-    marginRight: margin.right / TWIPS_PER_POINT,
+  const area: TextArea = {
+    left: lines.length ? Math.min(...lines.map((l) => l.x0)) : left,
+    right: lines.length ? Math.max(...lines.map((l) => l.x1)) : right,
+    center: width / 2,
+    innerLeft: margin.left / TWIPS_PER_POINT,
+    innerRight: width - margin.right / TWIPS_PER_POINT,
   }
 
-  const blocks = groupBlocks(lines, left, right)
-  return {
-    properties: { page: { size: pageSize(width, height), margin } },
-    children: blocks.map((block, i) => blockToParagraph(block, blocks[i - 1]?.lines.at(-1), page)),
+  // Lay out runs of lines and tables in the order they appear down the page.
+  const children: (Paragraph | Table)[] = []
+  let previousLine: TextLine | undefined
+  let previousTableBottom: number | undefined
+  let run: TextLine[] = []
+  const flushLines = () => {
+    for (const block of groupBlocks(run, area.left, area.right)) {
+      const first = block.lines[0]
+      const before = previousLine
+        ? first.y - previousLine.y - first.fontSize * 1.2
+        : previousTableBottom !== undefined
+          ? first.y - first.fontSize - previousTableBottom
+          : 0
+      children.push(blockToParagraph(block, before, area))
+      previousLine = block.lines.at(-1)
+      previousTableBottom = undefined
+    }
+    run = []
   }
+  const queue = [...tables]
+  const addTable = (table: PdfTable) => {
+    const above = previousLine
+      ? table.ys[0] - (previousLine.y + previousLine.fontSize * 0.25)
+      : previousTableBottom !== undefined
+        ? table.ys[0] - previousTableBottom
+        : 0
+    // Word joins tables with nothing between them, so a table after a table always gets a spacer paragraph.
+    if (above >= 1 || previousTableBottom !== undefined) children.push(spacer(above))
+    children.push(toWordTable(table, area.innerLeft))
+    previousLine = undefined
+    previousTableBottom = table.ys.at(-1)!
+  }
+  for (const line of lines) {
+    while (queue.length > 0 && queue[0].ys[0] < line.y - line.fontSize) {
+      flushLines()
+      addTable(queue.shift()!)
+    }
+    run.push(line)
+  }
+  flushLines()
+  queue.forEach(addTable)
+  // A page must end with a paragraph, not a table.
+  if (children.at(-1) instanceof Table) children.push(spacer(1))
+
+  return { properties: { page: { size: pageSize(width, height), margin } }, children }
 }
 
-interface PageGeometry {
-  /** Left and right edges of the page's text. */
+/** An empty paragraph exactly `height` points tall, to reproduce a vertical gap. */
+function spacer(height: number): Paragraph {
+  return new Paragraph({
+    spacing: { before: 0, after: 0, line: twips(Math.max(height, 1)), lineRule: LineRuleType.EXACT },
+  })
+}
+
+/** Where a stretch of text sits: the page body, or a table cell. All in points from the page's left edge. */
+interface TextArea {
+  /** Left and right edges of the text itself. */
   left: number
   right: number
-  pageWidth: number
-  marginLeft: number
-  marginRight: number
+  /** What centered text is centered on. */
+  center: number
+  /** The edges Word lays the text out between: the page margins, or a cell's padding. */
+  innerLeft: number
+  innerRight: number
+}
+
+function toWordTable(table: PdfTable, marginLeft: number): Table {
+  const { xs, ys, cells } = table
+  const padding = cellPadding(table)
+  // A full grid of identical lines is declared once for the whole table, as Word itself does, so rows added later
+  // get it too. Anything else is drawn cell by cell.
+  const sides = cells.flatMap((c) => [c.borders.top, c.borders.right, c.borders.bottom, c.borders.left])
+  const uniform = sides.every((b) => b && b.width === sides[0]!.width && b.color === sides[0]!.color)
+  const gridLine = wordBorder(uniform ? sides[0] : undefined)
+  return new Table({
+    layout: TableLayoutType.FIXED,
+    width: { size: twips(xs.at(-1)! - xs[0]), type: WidthType.DXA },
+    columnWidths: xs.slice(1).map((x, i) => twips(x - xs[i])),
+    indent: { size: twips(xs[0] - marginLeft), type: WidthType.DXA },
+    borders: uniform
+      ? { top: gridLine, right: gridLine, bottom: gridLine, left: gridLine, insideHorizontal: gridLine, insideVertical: gridLine }
+      : TableBorders.NONE,
+    margins: { top: 0, bottom: 0, left: twips(padding), right: twips(padding) },
+    rows: ys.slice(0, -1).map(
+      (y, r) =>
+        new TableRow({
+          height: { value: twips(ys[r + 1] - y), rule: HeightRule.ATLEAST },
+          cantSplit: true,
+          children: cells.filter((c) => c.row === r).map((c) => toWordCell(c, padding, !uniform)),
+        }),
+    ),
+  })
+}
+
+/** The gap between cell edges and their text, taken from the cell whose text comes closest to its left edge. */
+function cellPadding({ xs, cells }: PdfTable): number {
+  const gaps = cells.filter((c) => c.spans.length > 0).map((c) => Math.min(...c.spans.map((s) => s.x)) - c.x0)
+  const narrowest = Math.min(...xs.slice(1).map((x, i) => x - xs[i]))
+  return Math.min(Math.max(gaps.length ? Math.min(...gaps) : 2, 0), 12, narrowest * 0.3)
+}
+
+function toWordCell(cell: PdfTableCell, padding: number, withBorders: boolean): TableCell {
+  const lines = groupLines(cell.spans)
+  const area: TextArea = {
+    left: cell.x0 + padding,
+    right: cell.x1 - padding,
+    center: (cell.x0 + cell.x1) / 2,
+    innerLeft: cell.x0 + padding,
+    innerRight: cell.x1 - padding,
+  }
+  const { verticalAlign, spaceBefore } = cellPlacement(cell, lines)
+  // Wrapped lines end short of the cell's edge, so paragraphs are found against the text's own right edge.
+  const blocks = groupBlocks(lines, area.left, lines.length ? Math.max(...lines.map((l) => l.x1)) : area.right)
+  const paragraphs = blocks.map((block, i) => {
+    const previous = blocks[i - 1]?.lines.at(-1)
+    const first = block.lines[0]
+    return blockToParagraph(block, previous ? first.y - previous.y - first.fontSize * 1.2 : spaceBefore, area)
+  })
+  return new TableCell({
+    rowSpan: cell.rowSpan,
+    columnSpan: cell.columnSpan,
+    width: { size: twips(cell.x1 - cell.x0), type: WidthType.DXA },
+    verticalAlign,
+    shading: cell.fill ? { type: ShadingType.CLEAR, color: 'auto', fill: cell.fill.slice(1) } : undefined,
+    borders: withBorders
+      ? {
+          top: wordBorder(cell.borders.top),
+          right: wordBorder(cell.borders.right),
+          bottom: wordBorder(cell.borders.bottom),
+          left: wordBorder(cell.borders.left),
+        }
+      : undefined,
+    // A cell must hold a paragraph; an empty one is kept 1pt tall so the row's own height decides.
+    children: paragraphs.length > 0 ? paragraphs : [spacer(1)],
+  })
+}
+
+/** Whether a cell's text sits at its top, middle or bottom, and how far below the top edge when at the top. */
+function cellPlacement(cell: PdfTableCell, lines: TextLine[]) {
+  if (lines.length === 0) return { verticalAlign: VerticalAlignTable.TOP, spaceBefore: 0 }
+  const [first, last] = [lines[0], lines.at(-1)!]
+  const above = first.y - first.fontSize * 0.8 - cell.y0 // to roughly the top of the capitals
+  const below = cell.y1 - (last.y + last.fontSize * 0.2)
+  if (Math.abs(above - below) <= Math.max(2, (cell.y1 - cell.y0) * 0.1)) {
+    return { verticalAlign: VerticalAlignTable.CENTER, spaceBefore: 0 }
+  }
+  if (above < below) {
+    // Word's line box starts a little above the capitals.
+    return { verticalAlign: VerticalAlignTable.TOP, spaceBefore: Math.max(0, above - first.fontSize * 0.2) }
+  }
+  return { verticalAlign: VerticalAlignTable.BOTTOM, spaceBefore: 0 }
+}
+
+function wordBorder(border: Border | undefined) {
+  if (!border) return { style: BorderStyle.NONE, size: 0, color: 'auto' }
+  // Word measures border widths in eighths of a point, from 2 to 96.
+  const size = Math.min(Math.max(Math.round(border.width * 8), 2), 96)
+  return { style: BorderStyle.SINGLE, size, color: border.color.slice(1) }
 }
 
 /** Spans of one line with no wide gap between them; wide gaps separate table columns or tab-aligned text. */
@@ -188,11 +349,12 @@ function splitSegments(line: TextLine): Segment[] {
 
 type Alignment = 'left' | 'center' | 'right'
 
-/** Whether a stretch of text starting away from the left edge is centered on the page or flush with the right edge. */
-function alignmentOf({ x0, x1 }: { x0: number; x1: number }, { left, right, pageWidth }: PageGeometry): Alignment {
+/** Whether a stretch of text starting away from the left edge is centered in its area or flush with its right edge. */
+function alignmentOf({ x0, x1 }: { x0: number; x1: number }, area: TextArea): Alignment {
+  const { left, right, center } = area
   if (x0 <= left + (right - left) * 0.1) return 'left'
   if (Math.abs(x1 - right) <= 2) return 'right'
-  if (Math.abs((x0 + x1) / 2 - pageWidth / 2) < pageWidth * 0.02) return 'center'
+  if (Math.abs((x0 + x1) / 2 - center) < Math.max(2, (area.innerRight - area.innerLeft) * 0.02)) return 'center'
   return 'left'
 }
 
@@ -229,19 +391,19 @@ function continuesBlock(block: Block, prev: TextLine, line: TextLine, right: num
 
 const twips = (points: number) => Math.round(points * TWIPS_PER_POINT)
 
-function blockToParagraph({ lines }: Block, previous: TextLine | undefined, page: PageGeometry): Paragraph {
+/** `before` is the space above the paragraph, in points. */
+function blockToParagraph({ lines }: Block, before: number, area: TextArea): Paragraph {
   const first = lines[0]
   const segments = lines.map(splitSegments)
   // The whole paragraph is centered or right-aligned only when every line is a single stretch of text placed that way.
-  const lineAlignments = segments.map((s) => (s.length === 1 ? alignmentOf(s[0], page) : 'left'))
+  const lineAlignments = segments.map((s) => (s.length === 1 ? alignmentOf(s[0], area) : 'left'))
   const alignment = lineAlignments.every((a) => a === lineAlignments[0]) ? lineAlignments[0] : 'left'
 
   const lineGap = lines.length > 1 ? lines[1].y - first.y : undefined
-  const before = previous ? first.y - previous.y - first.fontSize * 1.2 : 0
-  const { runs, tabStops } = toRuns(segments, page)
+  const { runs, tabStops } = toRuns(segments, area)
   return new Paragraph({
     alignment: { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT }[alignment],
-    indent: paragraphIndent(lines, alignment, page),
+    indent: paragraphIndent(lines, alignment, area),
     spacing: {
       before: twips(Math.min(Math.max(before, 0), 72)),
       after: 0,
@@ -252,15 +414,15 @@ function blockToParagraph({ lines }: Block, previous: TextLine | undefined, page
   })
 }
 
-function paragraphIndent(lines: TextLine[], alignment: Alignment, page: PageGeometry) {
+function paragraphIndent(lines: TextLine[], alignment: Alignment, area: TextArea) {
   if (alignment === 'center') return undefined
   // Word right-aligns to its margin, which can sit right of where the text actually ended.
-  if (alignment === 'right') return { right: Math.max(0, twips(page.pageWidth - page.marginRight - lines[0].x1)) }
+  if (alignment === 'right') return { right: Math.max(0, twips(area.innerRight - lines[0].x1)) }
   const first = lines[0]
   const bodyLeft = lines[1]?.x0 ?? first.x0
   const firstLineOffset = first.x0 - bodyLeft
   return {
-    left: Math.max(0, twips(bodyLeft - page.marginLeft)),
+    left: Math.max(0, twips(bodyLeft - area.innerLeft)),
     ...(firstLineOffset >= 0 ? { firstLine: twips(firstLineOffset) } : { hanging: twips(-firstLineOffset) }),
   }
 }
@@ -275,9 +437,9 @@ interface RunStyle {
 /**
  * Converts lines (already split into segments) to styled runs. Every segment after a line's first is reached by a tab,
  * whose stop keeps it centered or flush right when it was placed that way, so a right-aligned date stays at the right
- * edge even if Word's font is a little wider. Positions are in points from the left margin.
+ * edge even if Word's font is a little wider. Positions are in points from the area's inner left edge.
  */
-function toRuns(lines: Segment[][], page: PageGeometry): { runs: TextRun[]; tabStops: TabStopDefinition[] } {
+function toRuns(lines: Segment[][], area: TextArea): { runs: TextRun[]; tabStops: TabStopDefinition[] } {
   const tabStops = new Map<number, TabStopDefinition['type']>()
   const runs: (RunStyle & { text: string })[] = []
   const append = (text: string, style: RunStyle) => {
@@ -295,14 +457,14 @@ function toRuns(lines: Segment[][], page: PageGeometry): { runs: TextRun[]; tabS
     segments.forEach((segment, j) => {
       let tab = ''
       if (j > 0) {
-        const alignment = alignmentOf(segment, page)
+        const alignment = alignmentOf(segment, area)
         const [type, x] =
           alignment === 'right'
             ? [TabStopType.RIGHT, segment.x1]
             : alignment === 'center'
               ? [TabStopType.CENTER, (segment.x0 + segment.x1) / 2]
               : [TabStopType.LEFT, segment.x0]
-        tabStops.set(Math.round(x - page.marginLeft), type)
+        tabStops.set(Math.round(x - area.innerLeft), type)
         tab = '\t'
       }
       let segmentSoFar = ''
